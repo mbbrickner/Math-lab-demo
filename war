@@ -1,0 +1,865 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Math War: Neon</title>
+  
+  <!-- Load Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Load React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Load Babel to compile JSX in the browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    /* Prevent default body margins and handle full height */
+    body { margin: 0; padding: 0; background-color: black; overflow: hidden; }
+    /* Custom Scrollbar for the databank */
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #111; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #00ffff; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useRef } = React;
+
+    // --- CONSTANTS & HELPERS ---
+    const SUITS = ['♥', '♦', '♣', '♠'];
+    const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+    const getValue = (rank) => {
+      if (rank === 'A') return 1;
+      if (rank === 'J') return 11;
+      if (rank === 'Q') return 12;
+      if (rank === 'K') return 0;
+      return parseInt(rank);
+    };
+
+    const getSuitColor = (suit) => {
+      return suit === '♥' || suit === '♦' ? 'text-[#ff0055] drop-shadow-[0_0_5px_rgba(255,0,85,0.8)]' : 'text-[#00ffff] drop-shadow-[0_0_5px_rgba(0,255,255,0.8)]';
+    };
+
+    const shuffle = (array) => {
+      const newArray = [...array];
+      let currentIndex = newArray.length, randomIndex;
+      while (currentIndex > 0) {
+        randomIndex = Math.floor(Math.random() * currentIndex);
+        currentIndex--;
+        [newArray[currentIndex], newArray[randomIndex]] = [newArray[randomIndex], newArray[currentIndex]];
+      }
+      return newArray;
+    };
+
+    const generateAlgebraQuestion = () => {
+      const types = [
+        () => {
+          const a = Math.floor(Math.random() * 5) + 2;
+          const x = Math.floor(Math.random() * 10) + 1;
+          const b = Math.floor(Math.random() * 10) + 1;
+          return { q: `Solve for x: ${a}x + ${b} = ${a * x + b}`, a: x };
+        },
+        () => {
+          const a = Math.floor(Math.random() * 5) + 2;
+          const x = Math.floor(Math.random() * 10) + 1;
+          const b = Math.floor(Math.random() * 10) + 1;
+          return { q: `Solve for x: ${a}x - ${b} = ${a * x - b}`, a: x };
+        },
+        () => {
+          const a = Math.floor(Math.random() * 4) + 2;
+          const x = (Math.floor(Math.random() * 10) + 1) * a;
+          const b = Math.floor(Math.random() * 10) + 1;
+          return { q: `Solve for x: x/${a} + ${b} = ${(x / a) + b}`, a: x };
+        }
+      ];
+      return types[Math.floor(Math.random() * types.length)]();
+    };
+
+    // --- COMPONENTS ---
+    const Card = ({ card, hidden }) => {
+      if (hidden) {
+        return (
+          <div className="w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 border-2 border-[#39ff14] bg-black rounded flex items-center justify-center shadow-[0_0_10px_#39ff14,inset_0_0_10px_#39ff14] shrink-0">
+            <div className="text-[#39ff14] text-xl font-bold opacity-50 bg-[repeating-linear-gradient(45deg,transparent,transparent_5px,#39ff14_5px,#39ff14_10px)] w-full h-full m-1"></div>
+          </div>
+        );
+      }
+
+      return (
+        <div className={`w-12 h-16 sm:w-16 sm:h-24 md:w-20 md:h-28 border-2 border-[#00ffff] bg-black rounded flex flex-col justify-between p-1 shadow-[0_0_8px_#00ffff,inset_0_0_8px_#00ffff] shrink-0`}>
+          <div className={`text-[10px] sm:text-sm font-bold ${getSuitColor(card.suit)}`}>{card.rank}</div>
+          <div className={`text-lg sm:text-3xl self-center ${getSuitColor(card.suit)}`}>{card.suit}</div>
+          <div className={`text-[10px] sm:text-sm font-bold self-end ${getSuitColor(card.suit)} transform rotate-180`}>{card.rank}</div>
+        </div>
+      );
+    };
+
+    const Scanlines = () => (
+      <div className="pointer-events-none fixed inset-0 z-50 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-30"></div>
+    );
+
+    const Numpad = ({ value, onChange, onSubmit, player, disabled, activeKey }) => {
+      const handlePress = (key) => {
+        if (disabled) return;
+        if (key === 'DEL') {
+          onChange(value.slice(0, -1));
+        } else if (key === 'ENTER') {
+          onSubmit();
+        } else {
+          if (value.length < 3) onChange(value + key);
+        }
+      };
+
+      const isP1 = player === 'P1';
+      const colorClass = isP1 
+        ? 'border-[#ff00ff] text-[#ff00ff] shadow-[0_0_5px_rgba(255,0,255,0.4)]' 
+        : 'border-[#39ff14] text-[#39ff14] shadow-[0_0_5px_rgba(57,255,20,0.4)]';
+
+      const hoverClass = disabled ? '' : (isP1 ? 'hover:bg-[#ff00ff]/20 active:bg-[#ff00ff]/40' : 'hover:bg-[#39ff14]/20 active:bg-[#39ff14]/40');
+
+      const renderButton = (key, label) => {
+        const isActive = activeKey === key;
+        const activeColor = isP1 ? 'bg-[#ff00ff] text-black' : 'bg-[#39ff14] text-black';
+        return (
+          <button 
+            key={key}
+            onClick={() => handlePress(key)} 
+            className={`border-2 font-bold p-1 text-xs sm:text-base md:text-lg rounded transition-all bg-black ${colorClass} ${hoverClass} ${isActive ? activeColor : ''} ${disabled ? 'cursor-default' : ''}`}
+          >
+            {label || key}
+          </button>
+        );
+      };
+
+      return (
+        <div className="grid grid-cols-3 gap-1 w-full max-w-[130px] sm:max-w-[160px] mx-auto">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => renderButton(n.toString()))}
+          {renderButton('DEL', 'DEL')}
+          {renderButton('0')}
+          {renderButton('ENTER', 'ENT')}
+        </div>
+      );
+    };
+
+    const TimesTableModal = ({ player, onClose, gameMode }) => {
+      const nums = Array.from({ length: 13 }, (_, i) => i);
+      const isP1 = player === 'P1';
+      
+      const mainColorClass = isP1 
+        ? 'text-[#ff00ff] border-[#ff00ff] shadow-[0_0_15px_rgba(255,0,255,0.6)]' 
+        : 'text-[#39ff14] border-[#39ff14] shadow-[0_0_15px_rgba(57,255,20,0.6)]';
+        
+      const hoverCellClass = isP1 ? 'hover:bg-[#ff00ff]/30' : 'hover:bg-[#39ff14]/30';
+      const btnHoverClass = isP1 ? 'hover:bg-[#ff00ff] hover:text-black' : 'hover:bg-[#39ff14] hover:text-black';
+
+      const rotationClass = (gameMode === 'TABLET' && !isP1) ? 'rotate-180' : '';
+
+      return (
+        <div className={`fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-2 animate-in fade-in duration-300 ${rotationClass}`}>
+          <h2 className={`text-lg sm:text-2xl mb-4 font-bold drop-shadow-[0_0_8px_currentColor] ${isP1 ? 'text-[#ff00ff]' : 'text-[#39ff14]'}`}>
+            [ DATABANK: MULTIPLICATION GRID ]
+          </h2>
+          <div className={`overflow-auto border-2 bg-black max-w-full max-h-[60vh] ${mainColorClass} scrollbar-thin scrollbar-thumb-gray-700`}>
+            <table className="border-collapse text-[10px] sm:text-xs text-center">
+              <thead>
+                <tr>
+                  <th className={`border p-1 sticky top-0 left-0 z-20 bg-gray-900 ${isP1 ? 'text-[#ff00ff] border-[#ff00ff]' : 'text-[#39ff14] border-[#39ff14]'}`}>×</th>
+                  {nums.map(n => (
+                    <th key={n} className={`border p-1 w-6 sm:w-8 sticky top-0 z-10 bg-gray-900 ${isP1 ? 'text-[#ff00ff] border-[#ff00ff]' : 'text-[#39ff14] border-[#39ff14]'}`}>{n}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {nums.map(row => (
+                  <tr key={row}>
+                    <th className={`border p-1 sticky left-0 z-10 bg-gray-900 ${isP1 ? 'text-[#ff00ff] border-[#ff00ff]' : 'text-[#39ff14] border-[#39ff14]'}`}>{row}</th>
+                    {nums.map(col => (
+                      <td key={col} className={`border border-gray-800 p-1 text-gray-400 cursor-crosshair transition-colors ${hoverCellClass}`}>
+                        {row * col}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button 
+            onClick={onClose} 
+            className={`mt-4 px-4 py-2 text-sm sm:text-base border-2 font-bold transition-all ${mainColorClass} ${btnHoverClass}`}
+          >
+            CLOSE DATABANK
+          </button>
+        </div>
+      );
+    };
+
+    const TeacherAuthModal = ({ onAuthSuccess, onClose }) => {
+      const [question, setQuestion] = useState({ q: '', a: null });
+      const [input, setInput] = useState('');
+      const [error, setError] = useState(false);
+      const inputRef = useRef(null);
+
+      useEffect(() => {
+        setQuestion(generateAlgebraQuestion());
+      }, []);
+
+      useEffect(() => {
+        if (inputRef.current) inputRef.current.focus();
+      }, [question]);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (parseInt(input) === question.a) {
+          onAuthSuccess();
+        } else {
+          setError(true);
+          setInput('');
+        }
+      };
+
+      return (
+        <div className="fixed inset-0 z-[150] bg-black/95 flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="border-2 border-yellow-400 bg-black p-6 sm:p-8 max-w-md w-full shadow-[0_0_15px_rgba(250,204,21,0.4)] text-center">
+            <h2 className="text-xl sm:text-2xl mb-4 font-bold drop-shadow-[0_0_8px_#facc15] text-yellow-400">
+              [ TEACHER VERIFICATION ]
+            </h2>
+            <p className="text-gray-300 mb-6 text-sm sm:text-base">AUTHORIZATION REQUIRED: SOLVE THE FOLLOWING EQUATION TO ACCESS LOGS.</p>
+            <div className="text-lg sm:text-xl font-bold text-[#00ffff] mb-6 tracking-wider">
+              {question.q}
+            </div>
+            <form onSubmit={handleSubmit} className="flex flex-col items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400 text-xl">x =</span>
+                <input 
+                  ref={inputRef}
+                  type="number" 
+                  value={input}
+                  onChange={(e) => { setInput(e.target.value); setError(false); }}
+                  className="bg-transparent border-b-2 border-yellow-400 text-yellow-400 text-xl w-20 text-center outline-none shadow-[0_4px_10px_rgba(250,204,21,0.2)]"
+                  autoComplete="off"
+                />
+              </div>
+              {error && <div className="text-[#ff0055] text-xs sm:text-sm animate-pulse mt-2">ERR: AUTHORIZATION FAILED. TRY AGAIN.</div>}
+              <div className="flex gap-4 mt-4 w-full justify-center">
+                <button type="submit" className="px-4 py-2 border-2 border-yellow-400 text-yellow-400 font-bold hover:bg-yellow-400 hover:text-black shadow-[0_0_5px_#facc15,inset_0_0_5px_#facc15] transition-all text-xs sm:text-sm">
+                  VERIFY
+                </button>
+                <button type="button" onClick={onClose} className="px-4 py-2 border-2 border-gray-600 text-gray-400 font-bold hover:bg-gray-600 hover:text-white shadow-[0_0_5px_gray,inset_0_0_5px_gray] transition-all text-xs sm:text-sm">
+                  CANCEL
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    const TeacherLogModal = ({ log, onClose }) => {
+      return (
+        <div className="fixed inset-0 z-[150] bg-black/95 flex flex-col items-center justify-center p-2 sm:p-4 animate-in fade-in duration-300">
+          <h2 className="text-xl sm:text-3xl mb-4 font-bold drop-shadow-[0_0_8px_#00ffff] text-[#00ffff]">
+            [ SECURE: TEACHER LOG ]
+          </h2>
+          <div className="overflow-auto border-2 border-[#00ffff] bg-black max-w-full w-full sm:w-[90%] md:w-[80%] max-h-[70vh] shadow-[0_0_15px_rgba(0,255,255,0.4)] scrollbar-thin scrollbar-thumb-[#00ffff]">
+            <table className="w-full border-collapse text-[10px] sm:text-xs md:text-sm text-center font-mono text-gray-300">
+              <thead className="sticky top-0 bg-gray-900 z-10 text-[#00ffff] border-b-2 border-[#00ffff]">
+                <tr>
+                  <th className="p-2 border-r border-[#00ffff]/30">PLYR</th>
+                  <th className="p-2 border-r border-[#00ffff]/30 hidden sm:table-cell">CARDS</th>
+                  <th className="p-2 border-r border-[#00ffff]/30">EQUATION</th>
+                  <th className="p-2 border-r border-[#00ffff]/30">INPUT</th>
+                  <th className="p-2 border-r border-[#00ffff]/30">EXPECTED</th>
+                  <th className="p-2 border-r border-[#00ffff]/30">RESULT</th>
+                  <th className="p-2">NOTES</th>
+                </tr>
+              </thead>
+              <tbody>
+                {log.length === 0 ? (
+                  <tr><td colSpan="7" className="p-6 text-gray-500 text-lg">NO DATA LOGGED.</td></tr>
+                ) : (
+                  log.map((entry, idx) => (
+                    <tr key={idx} className="border-b border-gray-800 hover:bg-gray-900/50">
+                      <td className={`p-2 border-r border-gray-800 font-bold ${entry.player === 'P1' ? 'text-[#ff00ff]' : 'text-[#39ff14]'}`}>
+                        {entry.isCPU ? 'CPU' : entry.player}
+                      </td>
+                      <td className="p-2 border-r border-gray-800 hidden sm:table-cell">{entry.cards}</td>
+                      <td className="p-2 border-r border-gray-800">{entry.equation}</td>
+                      <td className="p-2 border-r border-gray-800 text-white">{entry.input || '∅'}</td>
+                      <td className="p-2 border-r border-gray-800">{entry.expected}</td>
+                      <td className={`p-2 border-r border-gray-800 font-bold ${entry.correct ? 'text-[#39ff14]' : 'text-[#ff0055]'}`}>
+                        {entry.correct ? 'PASS' : 'FAIL'}
+                      </td>
+                      <td className="p-2 text-gray-400 text-[8px] sm:text-[10px] tracking-wider">
+                        {entry.hint ? '[HINT] ' : ''}
+                        {entry.retry ? '[RETRY]' : ''}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <button
+            onClick={onClose}
+            className="mt-6 px-6 py-3 border-2 border-[#00ffff] text-[#00ffff] font-bold hover:bg-[#00ffff] hover:text-black transition-all shadow-[0_0_10px_#00ffff,inset_0_0_5px_#00ffff]"
+          >
+            CLOSE LOG
+          </button>
+        </div>
+      );
+    };
+
+    // --- MAIN APP ---
+    function MathWar() {
+      const [gameMode, setGameMode] = useState(null);
+      const [deckP1, setDeckP1] = useState([]);
+      const [deckP2, setDeckP2] = useState([]);
+      const [tableP1, setTableP1] = useState([]);
+      const [tableP2, setTableP2] = useState([]);
+      const [warPool, setWarPool] = useState([]);
+      const [phase, setPhase] = useState('START');
+      const [inputValue, setInputValue] = useState('');
+      const [message, setMessage] = useState('SELECT GAME MODE TO INITIALIZE.');
+      const [winner, setWinner] = useState(null);
+      
+      // Ability States
+      const [p1HintCooldown, setP1HintCooldown] = useState(0);
+      const [p2HintCooldown, setP2HintCooldown] = useState(0);
+      const [p1RetryCooldown, setP1RetryCooldown] = useState(0);
+      const [p2RetryCooldown, setP2RetryCooldown] = useState(0);
+      
+      // Failure Tracking
+      const [p1Failed, setP1Failed] = useState(false);
+      const [p2Failed, setP2Failed] = useState(false);
+      
+      // Teacher Log States
+      const [gameLog, setGameLog] = useState([]);
+      const [showTeacherLog, setShowTeacherLog] = useState(false);
+      const [showTeacherAuth, setShowTeacherAuth] = useState(false);
+      const [turnHints, setTurnHints] = useState({ P1: false, P2: false });
+
+      const [showModalPlayer, setShowModalPlayer] = useState(null);
+      const [activeCPUKey, setActiveCPUKey] = useState(null); 
+
+      // AI Opponent Logic for SINGLE Player Mode
+      useEffect(() => {
+        if (gameMode === 'SINGLE' && phase === 'P2_SOLVE') {
+          let isMounted = true;
+          const prod = tableP2[0].value * tableP2[1].value;
+          const prodStr = prod.toString();
+          
+          setMessage('CPU IS CALCULATING...');
+          setInputValue('');
+
+          let charIndex = 0;
+
+          const typeNextChar = () => {
+            if (!isMounted) return;
+            if (charIndex < prodStr.length) {
+              const char = prodStr[charIndex];
+              setActiveCPUKey(char); 
+              
+              setTimeout(() => {
+                if (!isMounted) return;
+                setActiveCPUKey(null);
+                setInputValue(prev => prev + char);
+                charIndex++;
+                setTimeout(typeNextChar, 150 + Math.random() * 200); 
+              }, 150); 
+            } else {
+              setTimeout(() => {
+                if (!isMounted) return;
+                setActiveCPUKey('ENTER');
+                setTimeout(() => {
+                   if (!isMounted) return;
+                   setActiveCPUKey(null);
+                   handleSolveSubmit(null, prodStr);
+                }, 150);
+              }, 400);
+            }
+          };
+
+          const calcDelay = setTimeout(typeNextChar, 1000);
+
+          return () => {
+            isMounted = false;
+            clearTimeout(calcDelay);
+          };
+        }
+      }, [phase, gameMode, tableP2]);
+
+      const initGame = (mode) => {
+        const newDeck = [];
+        SUITS.forEach(suit => {
+          RANKS.forEach(rank => {
+            newDeck.push({ suit, rank, value: getValue(rank), id: `${rank}-${suit}` });
+          });
+        });
+        
+        const shuffledDeck = shuffle(newDeck);
+        setGameMode(mode);
+        setDeckP1(shuffledDeck.slice(0, 26));
+        setDeckP2(shuffledDeck.slice(26, 52));
+        setTableP1([]);
+        setTableP2([]);
+        setWarPool([]);
+        
+        setP1HintCooldown(0);
+        setP2HintCooldown(0);
+        setP1RetryCooldown(0);
+        setP2RetryCooldown(0);
+        setP1Failed(false);
+        setP2Failed(false);
+        
+        setGameLog([]);
+        setTurnHints({ P1: false, P2: false });
+        
+        setShowModalPlayer(null);
+        setPhase('DRAW');
+        setMessage(`SYSTEM READY. [${mode} MODE] COMMENCE MATH WAR.`);
+        setWinner(null);
+      };
+
+      const drawCards = () => {
+        if (deckP1.length < 2) {
+          setPhase('GAME_OVER');
+          setWinner('PLAYER 2');
+          setMessage('PLAYER 1 OUT OF CARDS.');
+          return;
+        }
+        if (deckP2.length < 2) {
+          setPhase('GAME_OVER');
+          setWinner('PLAYER 1');
+          setMessage('PLAYER 2 OUT OF CARDS.');
+          return;
+        }
+
+        const p1Draw = [deckP1[0], deckP1[1]];
+        const p2Draw = [deckP2[0], deckP2[1]];
+
+        setTableP1(p1Draw);
+        setTableP2(p2Draw);
+
+        setDeckP1(deckP1.slice(2));
+        setDeckP2(deckP2.slice(2));
+
+        setP1HintCooldown(prev => Math.max(0, prev - 1));
+        setP2HintCooldown(prev => Math.max(0, prev - 1));
+        setP1RetryCooldown(prev => Math.max(0, prev - 1));
+        setP2RetryCooldown(prev => Math.max(0, prev - 1));
+        setP1Failed(false);
+        setP2Failed(false);
+        setTurnHints({ P1: false, P2: false });
+        
+        setShowModalPlayer(null);
+
+        setPhase('P1_SOLVE');
+        setMessage('PLAYER 1 [PINK]: CALCULATE THE PRODUCT.');
+        setInputValue('');
+      };
+
+      const activateHint = (player) => {
+        if (player === 'P1' && phase === 'P1_SOLVE' && p1HintCooldown === 0) {
+          setP1HintCooldown(3);
+          setTurnHints(prev => ({ ...prev, P1: true }));
+          setShowModalPlayer('P1');
+        } else if (player === 'P2' && phase === 'P2_SOLVE' && p2HintCooldown === 0 && gameMode !== 'SINGLE') {
+          setP2HintCooldown(3);
+          setTurnHints(prev => ({ ...prev, P2: true }));
+          setShowModalPlayer('P2');
+        }
+      };
+
+      const handleSolveSubmit = (e, overrideInput = null) => {
+        if (e) e.preventDefault();
+        const valToSubmit = overrideInput !== null ? overrideInput : inputValue;
+        if (valToSubmit === '') return;
+        if (gameMode === 'SINGLE' && phase === 'P2_SOLVE' && overrideInput === null) return;
+
+        if (phase === 'P1_SOLVE') {
+          const prod = tableP1[0].value * tableP1[1].value;
+          const isCorrect = parseInt(valToSubmit) === prod;
+
+          setGameLog(prev => [...prev, {
+            player: 'P1',
+            isCPU: false,
+            cards: `${tableP1[0].rank}${tableP1[0].suit} & ${tableP1[1].rank}${tableP1[1].suit}`,
+            equation: `${tableP1[0].value} × ${tableP1[1].value}`,
+            expected: prod,
+            input: valToSubmit,
+            correct: isCorrect,
+            hint: turnHints.P1,
+            retry: p1RetryCooldown === 3 && !isCorrect 
+          }]);
+
+          if (isCorrect) {
+            setPhase('P2_SOLVE');
+            setMessage(gameMode === 'SINGLE' ? 'CPU TURN.' : 'PLAYER 2 [GREEN]: CALCULATE THE PRODUCT.');
+            setInputValue('');
+          } else {
+            if (p1RetryCooldown === 0) {
+              setP1RetryCooldown(3);
+              setMessage('ERR: INCORRECT. [RETRY USED]. TRY AGAIN, P1.');
+              setInputValue('');
+            } else {
+              setP1Failed(true);
+              setPhase('P2_SOLVE');
+              setMessage(`P1 FAILED! ${gameMode === 'SINGLE' ? 'CPU TURN.' : 'PLAYER 2 [GREEN]: CALCULATE.'}`);
+              setInputValue('');
+            }
+          }
+        } else if (phase === 'P2_SOLVE') {
+          const prod = tableP2[0].value * tableP2[1].value;
+          const isCorrect = parseInt(valToSubmit) === prod;
+
+          setGameLog(prev => [...prev, {
+            player: 'P2',
+            isCPU: gameMode === 'SINGLE',
+            cards: `${tableP2[0].rank}${tableP2[0].suit} & ${tableP2[1].rank}${tableP2[1].suit}`,
+            equation: `${tableP2[0].value} × ${tableP2[1].value}`,
+            expected: prod,
+            input: valToSubmit,
+            correct: isCorrect,
+            hint: turnHints.P2,
+            retry: p2RetryCooldown === 3 && !isCorrect && gameMode !== 'SINGLE'
+          }]);
+
+          if (isCorrect) {
+            setPhase('CHOOSE_WINNER');
+            setMessage('EVALUATE: WHO HAS THE SUPERIOR SCORE?');
+            setInputValue('');
+          } else {
+            if (p2RetryCooldown === 0 && gameMode !== 'SINGLE') {
+              setP2RetryCooldown(3);
+              setMessage('ERR: INCORRECT. [RETRY USED]. TRY AGAIN, P2.');
+              setInputValue('');
+            } else {
+              setP2Failed(true);
+              setPhase('CHOOSE_WINNER');
+              setMessage('P2 FAILED! EVALUATE: WHO HAS THE SUPERIOR SCORE?');
+              setInputValue('');
+            }
+          }
+        }
+      };
+
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (phase !== 'P1_SOLVE' && phase !== 'P2_SOLVE') return;
+          if (gameMode === 'SINGLE' && phase === 'P2_SOLVE') return;
+          if (showModalPlayer || showTeacherAuth || showTeacherLog) return;
+
+          if (e.key >= '0' && e.key <= '9') {
+            setInputValue(prev => prev.length < 3 ? prev + e.key : prev);
+          } else if (e.key === 'Backspace') {
+            setInputValue(prev => prev.slice(0, -1));
+          } else if (e.key === 'Enter') {
+            handleSolveSubmit();
+          }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [phase, gameMode, inputValue, tableP1, tableP2, showModalPlayer, p1RetryCooldown, p2RetryCooldown, turnHints]);
+
+      const chooseWinner = (choice) => {
+        const p1Score = p1Failed ? -1 : (tableP1[0].value * tableP1[1].value);
+        const p2Score = p2Failed ? -1 : (tableP2[0].value * tableP2[1].value);
+
+        let actualWinner = 'TIE';
+        if (p1Score > p2Score) actualWinner = 'P1';
+        if (p2Score > p1Score) actualWinner = 'P2';
+
+        if (choice !== actualWinner) {
+          setMessage('ERR: INCORRECT ANALYSIS. TRY AGAIN.');
+          return;
+        }
+
+        const allCards = [...tableP1, ...tableP2, ...warPool];
+
+        if (actualWinner === 'P1') {
+          setDeckP1([...deckP1, ...allCards]);
+          setWarPool([]);
+          setMessage(`P1 CLAIMS ${allCards.length} CARDS. READY.`);
+        } else if (actualWinner === 'P2') {
+          setDeckP2([...deckP2, ...allCards]);
+          setWarPool([]);
+          setMessage(`P2 CLAIMS ${allCards.length} CARDS. READY.`);
+        } else {
+          setWarPool([...warPool, ...tableP1, ...tableP2]);
+          setMessage('TIE DETECTED. CARDS ENTER THE WAR POOL.');
+        }
+
+        setTableP1([]);
+        setTableP2([]);
+        setPhase('DRAW');
+      };
+
+      return (
+        <div className="h-[100dvh] w-screen bg-black text-[#00ffff] font-mono selection:bg-[#ff00ff] selection:text-black overflow-hidden flex flex-col items-center relative">
+          <Scanlines />
+          
+          {showModalPlayer && (
+            <TimesTableModal player={showModalPlayer} onClose={() => setShowModalPlayer(null)} gameMode={gameMode} />
+          )}
+
+          {showTeacherAuth && (
+            <TeacherAuthModal 
+              onAuthSuccess={() => {
+                setShowTeacherAuth(false);
+                setShowTeacherLog(true);
+              }} 
+              onClose={() => setShowTeacherAuth(false)} 
+            />
+          )}
+
+          {showTeacherLog && (
+            <TeacherLogModal log={gameLog} onClose={() => setShowTeacherLog(false)} />
+          )}
+
+          {/* GLOBAL HEADER */}
+          <header className="w-full h-10 sm:h-12 shrink-0 text-center px-2 sm:px-4 border-b-2 border-[#00ffff] shadow-[0_4px_10px_rgba(0,255,255,0.2)] z-10 flex justify-between items-center bg-black">
+            <h1 className="text-sm sm:text-xl md:text-2xl font-bold tracking-widest drop-shadow-[0_0_10px_#00ffff]">MATH WAR: NEON</h1>
+            <div className="flex items-center gap-2 sm:gap-4">
+              <button 
+                onClick={() => setShowTeacherAuth(true)}
+                className="px-2 py-0.5 sm:px-3 sm:py-1 text-[8px] sm:text-[10px] md:text-xs font-bold border-2 border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black shadow-[0_0_5px_rgba(250,204,21,0.5),inset_0_0_5px_rgba(250,204,21,0.5)] transition-all"
+                title="Open Teacher Log"
+              >
+                [ LOG ]
+              </button>
+              <div className="text-[8px] sm:text-xs text-right border border-[#00ffff] px-1 sm:px-2 py-0.5 sm:py-1 rounded shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                <p>K=0 Q=12</p>
+                <p>J=11 A=1</p>
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN GAME CONTAINER (STRICT NO-SCROLL) */}
+          <div className="flex-1 w-full min-h-0 flex justify-center items-center p-1 sm:p-2 md:p-4 bg-gray-900/10">
+            
+            <main className={`relative h-full flex flex-col justify-between overflow-hidden transition-all duration-700 mx-auto bg-black ${
+                gameMode === 'TABLET' 
+                ? 'aspect-[3/4] max-w-full border-[6px] sm:border-[10px] md:border-[16px] border-[#1a1a1a] rounded-xl sm:rounded-[2rem] shadow-[0_0_0_2px_#333,0_20px_50px_rgba(0,0,0,0.8)]' 
+                : 'w-full max-w-2xl border-x border-[#00ffff]/10'
+             }`}>
+              
+              {/* PLAYER 2 (TOP ZONE) */}
+              <div className={`flex-1 flex flex-col items-center justify-start p-1 sm:p-2 min-h-0 relative transition-transform duration-500 ${gameMode === 'TABLET' ? 'rotate-180' : ''}`}>
+                
+                <div className="flex justify-between items-center w-full text-[#39ff14] font-bold drop-shadow-[0_0_5px_#39ff14] text-[10px] sm:text-sm px-1 sm:px-2 shrink-0">
+                  <span>
+                    {gameMode === 'SINGLE' ? 'COMPUTER' : 'PLAYER 2'}
+                    {p2Failed && <span className="text-[#ff0055] ml-1 animate-pulse">[FAILED]</span>}
+                  </span>
+                  
+                  <div className="flex gap-1">
+                    {gameMode !== 'SINGLE' ? (
+                      <>
+                        <div className={`px-1 py-0.5 sm:px-2 sm:py-1 text-[8px] sm:text-[10px] border rounded transition-all flex items-center justify-center ${
+                          p2RetryCooldown === 0
+                            ? 'border-[#39ff14] text-[#39ff14] shadow-[0_0_5px_#39ff14,inset_0_0_2px_#39ff14]'
+                            : 'border-gray-800 text-gray-600 bg-black'
+                        }`}>
+                          {p2RetryCooldown === 0 ? '⟲ RDY' : `⟲ ${p2RetryCooldown}`}
+                        </div>
+                        <button
+                          onClick={() => activateHint('P2')}
+                          disabled={p2HintCooldown > 0 || phase !== 'P2_SOLVE'}
+                          className={`px-1 py-0.5 sm:px-2 sm:py-1 text-[8px] sm:text-[10px] border rounded transition-all flex items-center justify-center ${
+                            p2HintCooldown === 0
+                              ? phase === 'P2_SOLVE'
+                                ? 'border-[#39ff14] bg-[#39ff14]/20 shadow-[0_0_10px_#39ff14,inset_0_0_5px_#39ff14] animate-pulse cursor-pointer text-[#39ff14]'
+                                : 'border-[#39ff14]/50 text-[#39ff14]/50 cursor-not-allowed'
+                              : 'border-gray-800 text-gray-600 cursor-not-allowed bg-black'
+                          }`}
+                        >
+                          {p2HintCooldown === 0 ? '💡 RDY' : `💡 ${p2HintCooldown}`}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="text-[8px] sm:text-[10px] text-gray-600 border border-gray-800 px-1 sm:px-2 py-0.5 sm:py-1 rounded flex items-center justify-center">[ CPU ]</div>
+                    )}
+                  </div>
+
+                  <span>DECK: {deckP2.length}</span>
+                </div>
+
+                {/* Side-by-Side Numpad and Cards */}
+                <div className="flex flex-row w-full flex-1 min-h-0 items-center justify-center gap-4 sm:gap-8 md:gap-16 mt-1 sm:mt-2">
+                  <div className="flex gap-2 sm:gap-4 items-center justify-center shrink-0">
+                    {tableP2.length > 0 ? (
+                      tableP2.map((card, idx) => <Card key={idx} card={card} hidden={phase === 'P1_SOLVE'} />)
+                    ) : (
+                      <div className="w-12 h-16 sm:w-16 sm:h-24 border border-dashed border-gray-700 flex items-center justify-center text-gray-700 text-[8px] sm:text-[10px] text-center p-1 shrink-0">WAITING</div>
+                    )}
+                  </div>
+
+                  <div className={`shrink-0 transition-opacity duration-300 ${phase === 'P2_SOLVE' ? 'opacity-100' : 'opacity-15 pointer-events-none'}`}>
+                     <Numpad 
+                       value={inputValue} 
+                       onChange={setInputValue} 
+                       onSubmit={() => handleSolveSubmit()} 
+                       player="P2" 
+                       disabled={gameMode === 'SINGLE'} 
+                       activeKey={activeCPUKey}
+                     />
+                  </div>
+                </div>
+
+              </div>
+
+              {/* CENTER CONSOLE (MIDDLE ZONE) */}
+              <div className={`shrink-0 h-[22%] min-h-[80px] sm:min-h-[100px] flex flex-col items-center justify-center p-1 text-center transition-transform duration-500 z-20 ${gameMode === 'TABLET' && phase === 'P2_SOLVE' ? 'rotate-180' : ''}`}>
+                
+                <div className="h-6 sm:h-8 flex items-center justify-center w-full px-1 sm:px-2 mb-1 sm:mb-2">
+                  <p className={`text-[10px] sm:text-sm md:text-base font-bold animate-pulse ${message.includes('ERR') || message.includes('FAILED') ? 'text-[#ff0055] drop-shadow-[0_0_8px_#ff0055]' : 'text-[#00ffff] drop-shadow-[0_0_8px_#00ffff]'}`}>
+                    {message}
+                  </p>
+                </div>
+
+                {phase === 'START' && (
+                  <div className="flex flex-row w-full max-w-sm gap-1 sm:gap-2 justify-center px-1">
+                    <button onClick={() => initGame('SINGLE')} className="flex-1 px-1 py-1 sm:py-2 text-[9px] sm:text-xs md:text-sm border-2 border-[#00ffff] text-[#00ffff] font-bold hover:bg-[#00ffff] hover:text-black shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                      SOLO<br className="sm:hidden" /> (VS CPU)
+                    </button>
+                    <button onClick={() => initGame('PASS')} className="flex-1 px-1 py-1 sm:py-2 text-[9px] sm:text-xs md:text-sm border-2 border-[#00ffff] text-[#00ffff] font-bold hover:bg-[#00ffff] hover:text-black shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                      PASS &<br className="sm:hidden" /> PLAY
+                    </button>
+                    <button onClick={() => initGame('TABLET')} className="flex-1 px-1 py-1 sm:py-2 text-[9px] sm:text-xs md:text-sm border-2 border-[#00ffff] text-[#00ffff] font-bold hover:bg-[#00ffff] hover:text-black shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                      TABLETOP<br className="sm:hidden" /> (FLAT)
+                    </button>
+                  </div>
+                )}
+
+                {phase === 'DRAW' && (
+                  <div className="flex flex-col items-center gap-1 sm:gap-2">
+                     {warPool.length > 0 && (
+                       <div className="text-[#ff0055] text-[10px] sm:text-xs font-bold border border-[#ff0055] px-2 py-0.5 sm:py-1 rounded shadow-[0_0_5px_#ff0055,inset_0_0_5px_#ff0055] animate-pulse">
+                         WAR POOL: {warPool.length}
+                       </div>
+                     )}
+                    <button onClick={drawCards} className="px-4 sm:px-6 py-2 sm:py-3 border-2 border-[#00ffff] text-[#00ffff] font-bold text-sm sm:text-lg hover:bg-[#00ffff] hover:text-black shadow-[0_0_10px_#00ffff,inset_0_0_10px_#00ffff]">
+                      DRAW CARDS
+                    </button>
+                  </div>
+                )}
+
+                {(phase === 'P1_SOLVE' || phase === 'P2_SOLVE') && (
+                  <div className="flex gap-2 items-center justify-center">
+                    <span className="text-lg sm:text-xl">&gt;</span>
+                    <div className={`bg-transparent border-b-2 text-lg sm:text-xl w-20 sm:w-24 outline-none text-center pb-0.5 sm:pb-1 min-h-[28px] sm:min-h-[32px] ${phase === 'P1_SOLVE' ? 'border-[#ff00ff] text-[#ff00ff] shadow-[0_4px_10px_rgba(255,0,255,0.5)]' : 'border-[#39ff14] text-[#39ff14] shadow-[0_4px_10px_rgba(57,255,20,0.5)]'}`}>
+                      {inputValue || <span className="opacity-30">PROD</span>}
+                    </div>
+                  </div>
+                )}
+
+                {phase === 'CHOOSE_WINNER' && (
+                  <div className="flex flex-row w-full max-w-sm gap-1 sm:gap-2 justify-center px-1">
+                    <button onClick={() => chooseWinner('P1')} className="flex-1 px-1 py-1.5 sm:py-2 text-[10px] sm:text-sm border-2 border-[#ff00ff] text-[#ff00ff] font-bold hover:bg-[#ff00ff] hover:text-black shadow-[0_0_5px_#ff00ff,inset_0_0_5px_#ff00ff]">
+                      P1 WINS
+                    </button>
+                    <button onClick={() => chooseWinner('TIE')} className="flex-1 px-1 py-1.5 sm:py-2 text-[10px] sm:text-sm border-2 border-[#00ffff] text-[#00ffff] font-bold hover:bg-[#00ffff] hover:text-black shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                      TIE (WAR)
+                    </button>
+                    <button onClick={() => chooseWinner('P2')} className="flex-1 px-1 py-1.5 sm:py-2 text-[10px] sm:text-sm border-2 border-[#39ff14] text-[#39ff14] font-bold hover:bg-[#39ff14] hover:text-black shadow-[0_0_5px_#39ff14,inset_0_0_5px_#39ff14]">
+                      P2 WINS
+                    </button>
+                  </div>
+                )}
+
+                {phase === 'GAME_OVER' && (
+                   <div className="flex flex-col items-center gap-2 sm:gap-3">
+                      <div className="text-xl sm:text-3xl font-bold text-[#ff0055] drop-shadow-[0_0_10px_#ff0055] animate-bounce">
+                        {winner} WINS!
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => setPhase('START')} className="px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-[#00ffff] text-[#00ffff] font-bold text-xs sm:text-sm hover:bg-[#00ffff] hover:text-black shadow-[0_0_5px_#00ffff,inset_0_0_5px_#00ffff]">
+                          MAIN MENU
+                        </button>
+                        <button onClick={() => setShowTeacherAuth(true)} className="px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-yellow-400 text-yellow-400 font-bold text-xs sm:text-sm hover:bg-yellow-400 hover:text-black shadow-[0_0_5px_rgba(250,204,21,0.5),inset_0_0_5px_rgba(250,204,21,0.5)]">
+                          TEACHER LOG
+                        </button>
+                      </div>
+                   </div>
+                )}
+              </div>
+
+              {/* PLAYER 1 (BOTTOM ZONE) */}
+              <div className="flex-1 flex flex-col items-center justify-end p-1 sm:p-2 min-h-0 relative">
+                
+                {/* Side-by-Side Numpad and Cards */}
+                <div className="flex flex-row w-full flex-1 min-h-0 items-center justify-center gap-4 sm:gap-8 md:gap-16 mb-1 sm:mb-2">
+                  <div className="flex gap-2 sm:gap-4 items-center justify-center shrink-0">
+                     {tableP1.length > 0 ? (
+                      tableP1.map((card, idx) => <Card key={idx} card={card} hidden={false} />)
+                    ) : (
+                      <div className="w-12 h-16 sm:w-16 sm:h-24 border border-dashed border-gray-700 flex items-center justify-center text-gray-700 text-[8px] sm:text-[10px] text-center p-1 shrink-0">WAITING</div>
+                    )}
+                  </div>
+
+                  <div className={`shrink-0 transition-opacity duration-300 ${phase === 'P1_SOLVE' ? 'opacity-100' : 'opacity-15 pointer-events-none'}`}>
+                     <Numpad 
+                       value={inputValue} 
+                       onChange={setInputValue} 
+                       onSubmit={() => handleSolveSubmit()} 
+                       player="P1" 
+                       disabled={phase !== 'P1_SOLVE'} 
+                     />
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center w-full text-[#ff00ff] font-bold drop-shadow-[0_0_5px_#ff00ff] text-[10px] sm:text-sm px-1 sm:px-2 shrink-0">
+                  <span>
+                    PLAYER 1
+                    {p1Failed && <span className="text-[#ff0055] ml-1 animate-pulse">[FAILED]</span>}
+                  </span>
+                  
+                  <div className="flex gap-1">
+                    <div className={`px-1 py-0.5 sm:px-2 sm:py-1 text-[8px] sm:text-[10px] border rounded transition-all flex items-center justify-center ${
+                      p1RetryCooldown === 0
+                        ? 'border-[#ff00ff] text-[#ff00ff] shadow-[0_0_5px_#ff00ff,inset_0_0_2px_#ff00ff]'
+                        : 'border-gray-800 text-gray-600 bg-black'
+                    }`}>
+                      {p1RetryCooldown === 0 ? '⟲ RDY' : `⟲ ${p1RetryCooldown}`}
+                    </div>
+                    <button
+                      onClick={() => activateHint('P1')}
+                      disabled={p1HintCooldown > 0 || phase !== 'P1_SOLVE'}
+                      className={`px-1 py-0.5 sm:px-2 sm:py-1 text-[8px] sm:text-[10px] border rounded transition-all flex items-center justify-center ${
+                        p1HintCooldown === 0
+                          ? phase === 'P1_SOLVE'
+                            ? 'border-[#ff00ff] bg-[#ff00ff]/20 shadow-[0_0_10px_#ff00ff,inset_0_0_5px_#ff00ff] animate-pulse cursor-pointer text-[#ff00ff]'
+                            : 'border-[#ff00ff]/50 text-[#ff00ff]/50 cursor-not-allowed'
+                          : 'border-gray-800 text-gray-600 cursor-not-allowed bg-black'
+                      }`}
+                    >
+                      {p1HintCooldown === 0 ? '💡 RDY' : `💡 ${p1HintCooldown}`}
+                    </button>
+                  </div>
+
+                  <span>DECK: {deckP1.length}</span>
+                </div>
+
+              </div>
+
+            </main>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<MathWar />);
+  </script>
+</body>
+</html>
+
+```
